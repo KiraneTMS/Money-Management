@@ -188,7 +188,7 @@
     <input type="text" id="transferNote" placeholder="Top up dari BCA" />
   </div>
 
-  <button class="primary" style="margin-top:16px; width:100%;" onclick="addTransaction()">Save</button>
+  <button id="btnSaveTransaction" class="primary" style="margin-top:16px; width:100%;">Save</button>
 </div>
 
 <div class="section">
@@ -595,6 +595,7 @@
   }
   document.getElementById('btnAddSource').addEventListener('click', addSource);
   document.getElementById('btnToggleReport').addEventListener('click', toggleReport);
+  document.getElementById('btnSaveTransaction').addEventListener('click', addTransaction);
   // Init date picker
   document.getElementById('date').value = new Date().toISOString().slice(0,10);
 </script>
