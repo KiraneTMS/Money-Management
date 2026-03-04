@@ -111,6 +111,24 @@
     }
     .report-card h4 { margin-bottom: 12px; color: #374151; }
 
+    .pagination {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .pagination button {
+      padding: 8px 16px;
+      font-size: 0.95rem;
+    }
+    .pagination button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .transactions-container { display: none; }
+    .transactions-container.show { display: block; }
+
     @media (max-width: 640px) {
       body { padding: 12px; }
       h1 { font-size: 1.6rem; }
@@ -126,10 +144,34 @@
         padding: 14px;
         margin-bottom: 12px;
       }
+      .balance-table {
+        display: block;
+        overflow-x: auto;
+      }
+      .balance-table thead, .balance-table tbody, .balance-table tr, .balance-table th, .balance-table td {
+        display: block;
+      }
+      .balance-table tr {
+        margin-bottom: 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+      }
+      .balance-table th { display: none; }
+      .balance-table td {
+        text-align: right;
+        border: none;
+        padding: 8px 12px;
+      }
+      .balance-table td:first-child {
+        text-align: left;
+        font-weight: bold;
+        background: #f3f4f6;
+        border-radius: 8px 8px 0 0;
+      }
     }
 
     @media print {
-      button, .delete-btn, h1, #add-section, #transaction-section { display: none !important; }
+      button, .delete-btn, .pagination, h1, #add-section { display: none !important; }
       #report { display: block !important; }
       body { background: white; padding: 0; }
     }
@@ -140,7 +182,9 @@
 <div class="container">
 
 <h1>💸 Money Tracker (Firestore)</h1>
-
+<div class="total-balance">
+  Total Balance: <span id="totalBalanceDisplay">0</span>
+</div>
 <div class="section">
   <h3>Manage Sources</h3>
   <input type="text" id="newSource" placeholder="BCA • Gopay • Cash • Dompet" />
@@ -193,22 +237,26 @@
 
 <div class="section">
   <h3>Transactions</h3>
-  <div class="table-wrapper">
-    <table id="transTable">
-      <thead>
-        <tr>
-          <th>Date</th>
-          <th>Type</th>
-          <th>Amount</th>
-          <th>From / Source</th>
-          <th>To / Note</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody id="transBody"></tbody>
-    </table>
+  <button id="btnToggleTransactions" class="primary">Show / Hide Transactions</button>
+  <div class="transactions-container" id="transactionsContainer">
+    <div class="table-wrapper">
+      <table id="transTable">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Amount</th>
+            <th>From / Source</th>
+            <th>To / Note</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="transBody"></tbody>
+      </table>
+    </div>
+    <div id="transCards"></div>
+    <div class="pagination" id="transPagination"></div>
   </div>
-  <div id="transCards"></div>
 </div>
 
 <div class="section">
@@ -225,7 +273,10 @@
   
   <div id="report">
     <div class="report-total" id="reportOverview"></div>
+    
     <div class="report-grid" id="reportPerSource"></div>
+    <div class="pagination" id="reportPagination"></div>
+
     <div style="margin-top:32px; text-align:center; color:#6b7280;">
       <small>Printed / saved on: <span id="reportDate"></span></small>
     </div>
@@ -235,7 +286,6 @@
 </div>
 
 <script type="module">
-  // Firebase Modular SDK imports (latest as of Feb 2026: v12.10.0)
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
   import {
     getFirestore,
@@ -246,11 +296,9 @@
     onSnapshot,
     query,
     orderBy,
-    serverTimestamp,
-    where
+    serverTimestamp
   } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
 
-  // Your Firebase config (keep this — it's safe for client-side)
   const firebaseConfig = {
     apiKey: "AIzaSyBQWerKMV8x0nGLYo2JxY255MVthOnTSjU",
     authDomain: "money-tracker-arin.firebaseapp.com",
@@ -264,7 +312,6 @@
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
 
-  // Global data (no more localStorage)
   let data = {
     sources: [],
     transactions: []
@@ -273,20 +320,18 @@
   const SOURCES_COLLECTION = "sources";
   const TRANSACTIONS_COLLECTION = "transactions";
 
-  // Real-time listener for sources
-  onSnapshot(collection(db, SOURCES_COLLECTION), (snap) => {
-    data.sources = snap.docs.map(d => ({ id: d.id, ...d.data() })).map(s => s.name).sort();
+  // Real-time listeners
+  onSnapshot(collection(db, SOURCES_COLLECTION), snap => {
+    data.sources = snap.docs.map(d => d.data().name).sort();
     updateAll();
-  }, (err) => console.error("Sources listener error:", err));
+  });
 
-  // Real-time listener for transactions (sorted by date desc)
   onSnapshot(
     query(collection(db, TRANSACTIONS_COLLECTION), orderBy("date", "desc")),
-    (snap) => {
+    snap => {
       data.transactions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       updateAll();
-    },
-    (err) => console.error("Transactions listener error:", err)
+    }
   );
 
   function getBalances() {
@@ -294,7 +339,7 @@
     data.sources.forEach(s => balances[s] = 0);
 
     data.transactions.forEach(t => {
-      const amt = Number(t.amount);
+      const amt = Number(t.amount) || 0;
       if (t.type === 'income') balances[t.source] = (balances[t.source] || 0) + amt;
       else if (t.type === 'expense') balances[t.source] = (balances[t.source] || 0) - amt;
       else if (t.type === 'transfer') {
@@ -305,63 +350,25 @@
     return balances;
   }
 
-  function canDeleteSource(sourceName) {
-    const balances = getBalances();
-    const hasBalance = balances[sourceName] !== 0;
-    const hasTransactions = data.transactions.some(t => 
-      t.source === sourceName || t.from === sourceName || t.to === sourceName
-    );
-    return !hasBalance && !hasTransactions;
-  }
-
-  async function deleteSource(sourceName) {
-    if (!canDeleteSource(sourceName)) {
-      const balances = getBalances();
-      const reason = balances[sourceName] !== 0 
-        ? `Balance is not zero (${balances[sourceName].toLocaleString('id-ID')})`
-        : 'This source is used in some transactions';
-      alert(`Cannot delete "${sourceName}" because:\n${reason}\n\n(only unused sources with zero balance can be removed)`);
-      return;
-    }
-
-    if (!confirm(`Really delete source "${sourceName}"?`)) return;
-
-    // Find the doc id for this source name
-    const q = query(collection(db, SOURCES_COLLECTION), where("name", "==", sourceName));
-    const snap = await getDocs(q);
-    if (snap.empty) return;
-
-    const docId = snap.docs[0].id;
-    await deleteDoc(doc(db, SOURCES_COLLECTION, docId));
-    // No need to updateAll — listener will catch it
-  }
-
   async function addSource() {
-    const input = document.getElementById('newSource');
-    const name = input.value.trim();
+    const name = document.getElementById('newSource').value.trim();
     if (!name) return alert('Masukkan nama sumber');
     if (data.sources.includes(name)) return alert('Sudah ada');
 
-    await addDoc(collection(db, SOURCES_COLLECTION), {
-      name,
-      createdAt: serverTimestamp()
-    });
-
-    input.value = '';
-    // listener will update UI
+    await addDoc(collection(db, SOURCES_COLLECTION), { name, createdAt: serverTimestamp() });
+    document.getElementById('newSource').value = '';
   }
 
   async function addTransaction() {
     const type = document.getElementById('type').value;
     const date = document.getElementById('date').value;
-
     let transactionData;
 
     if (type === 'transfer') {
       const amount = document.getElementById('transferAmount').value;
-      const from   = document.getElementById('fromSource').value;
-      const to     = document.getElementById('toSource').value;
-      const note   = document.getElementById('transferNote').value.trim();
+      const from = document.getElementById('fromSource').value;
+      const to = document.getElementById('toSource').value;
+      const note = document.getElementById('transferNote').value.trim();
 
       if (!date || !amount || Number(amount) <= 0 || !from || !to) return alert('Isi semua kolom transfer');
       if (from === to) return alert('Sumber asal dan tujuan harus berbeda');
@@ -370,7 +377,7 @@
     } else {
       const amount = document.getElementById('amount').value;
       const source = document.getElementById('source').value;
-      const note   = document.getElementById('note').value.trim();
+      const note = document.getElementById('note').value.trim();
 
       if (!date || !amount || Number(amount) <= 0 || !source) return alert('Isi semua kolom');
 
@@ -388,23 +395,15 @@
       if (el) el.value = '';
     });
     document.getElementById('date').value = new Date().toISOString().slice(0,10);
-
-    // listener handles UI update
   }
 
   function deleteTransaction(docId) {
     if (!confirm('Hapus transaksi ini?')) return;
     deleteDoc(doc(db, TRANSACTIONS_COLLECTION, docId));
-    // listener will refresh
   }
 
   function updateSourceSelects() {
-    const selectors = [
-      document.getElementById('source'),
-      document.getElementById('fromSource'),
-      document.getElementById('toSource')
-    ].filter(Boolean);
-
+    const selectors = [document.getElementById('source'), document.getElementById('fromSource'), document.getElementById('toSource')].filter(Boolean);
     selectors.forEach(sel => sel.innerHTML = '');
 
     data.sources.forEach(src => {
@@ -425,41 +424,35 @@
     data.sources.forEach(src => {
       const item = document.createElement('div');
       item.className = 'source-item';
-
-      const nameSpan = document.createElement('span');
-      nameSpan.textContent = src;
-      item.appendChild(nameSpan);
-
-      const bal = balances[src] || 0;
-      if (bal !== 0) {
-        const balSpan = document.createElement('span');
-        balSpan.style.marginLeft = '8px';
-        balSpan.style.fontWeight = 'bold';
-        balSpan.style.color = bal >= 0 ? 'var(--green)' : 'var(--red)';
-        balSpan.textContent = bal.toLocaleString('id-ID');
-        item.appendChild(balSpan);
-      }
-
-      const delBtn = document.createElement('button');
-      delBtn.className = 'delete-btn';
-      delBtn.textContent = '×';
-      delBtn.onclick = () => deleteSource(src);
-      item.appendChild(delBtn);
-
+      item.innerHTML = `
+        <span>${src}</span>
+        ${balances[src] ? `<span style="margin-left:8px; font-weight:bold; color:${balances[src] >= 0 ? 'var(--green)' : 'var(--red)'}">
+          ${balances[src].toLocaleString('id-ID')}
+        </span>` : ''}
+        <button class="delete-btn" onclick="deleteSource('${src}')">×</button>
+      `;
       container.appendChild(item);
     });
 
-    document.getElementById('sourceHint').textContent = 
-      data.sources.length === 0 ? 'No sources yet. Add your first one above.' : '';
+    document.getElementById('sourceHint').textContent = data.sources.length === 0 ? 'No sources yet.' : '';
   }
 
-  function updateTransactions() {
+  // Pagination variables
+  let transPage = 1;
+  let reportPage = 1;
+  const ITEMS_PER_PAGE = 10;
+
+  function renderTransactions(page = 1) {
+    transPage = page;
     const tbody = document.getElementById('transBody');
     const cardsDiv = document.getElementById('transCards');
     tbody.innerHTML = cardsDiv.innerHTML = '';
 
-    // Already sorted by Firestore query (date desc)
-    data.transactions.forEach(t => {
+    const start = (page - 1) * ITEMS_PER_PAGE;
+    const end = start + ITEMS_PER_PAGE;
+    const paginated = data.transactions.slice(start, end);
+
+    paginated.forEach(t => {
       let displayType = t.type.charAt(0).toUpperCase() + t.type.slice(1);
       let fromCol = t.source || t.from || '—';
       let toNoteCol = t.note || t.to || '—';
@@ -485,7 +478,7 @@
       card.className = 'trans-card';
       card.innerHTML = `
         <div><strong>${t.date}</strong> • ${displayType}</div>
-        <div style="margin:6px 0; color: ${t.type==='income'? 'var(--green)' : t.type==='expense'?'var(--red)':'var(--purple)'}">
+        <div style="margin:6px 0; color: ${t.type==='income'?'var(--green)':t.type==='expense'?'var(--red)':'var(--purple)'}">
           ${amountSign} ${Number(t.amount).toLocaleString('id-ID')}
         </div>
         <div>${fromCol} → ${toNoteCol}</div>
@@ -493,31 +486,19 @@
       `;
       cardsDiv.appendChild(card);
     });
+
+    renderPagination('transPagination', page, Math.ceil(data.transactions.length / ITEMS_PER_PAGE), setTransPage);
   }
 
-  function updateBalances() {
-    const tbody = document.getElementById('balanceBody');
-    tbody.innerHTML = '';
+  function setTransPage(page) {
+    if (page < 1 || page > Math.ceil(data.transactions.length / ITEMS_PER_PAGE)) return;
+    renderTransactions(page);
+  }
+
+  function renderReport(page = 1) {
+    reportPage = page;
 
     const balances = getBalances();
-
-    Object.entries(balances).sort((a,b) => b[1] - a[1]).forEach(([src, bal]) => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${src}</td>
-        <td style="text-align:right; color:${bal >= 0 ? 'var(--green)' : 'var(--red)'}">
-          ${bal.toLocaleString('id-ID')}
-        </td>
-      `;
-      tbody.appendChild(tr);
-    });
-
-    return balances;
-  }
-
-  function generateReport() {
-    const balances = updateBalances();
-
     let totalIncome = 0, totalExpense = 0, totalTransferVol = 0;
     data.transactions.forEach(t => {
       const amt = Number(t.amount) || 0;
@@ -527,8 +508,12 @@
     });
 
     const netChange = totalIncome - totalExpense;
+    const totalBalance = Object.values(balances).reduce((sum, b) => sum + b, 0);
 
     document.getElementById('reportOverview').innerHTML = `
+      <div>Total Balance: <span style="color:${totalBalance >= 0 ? 'var(--green)' : 'var(--red)'}; font-size:1.6rem;">
+        ${totalBalance.toLocaleString('id-ID')}
+      </span></div>
       <div>Total Income: <span class="income">+ ${totalIncome.toLocaleString('id-ID')}</span></div>
       <div>Total Spending: <span class="expense">- ${totalExpense.toLocaleString('id-ID')}</span></div>
       <div>Net Change: <span style="color:${netChange >= 0 ? 'var(--green)' : 'var(--red)'}">
@@ -541,10 +526,14 @@
     const grid = document.getElementById('reportPerSource');
     grid.innerHTML = '';
 
-    data.sources.forEach(src => {
+    const start = (page - 1) * ITEMS_PER_PAGE;
+    const end = start + ITEMS_PER_PAGE;
+    const paginatedSources = data.sources.slice(start, end);
+
+    paginatedSources.forEach(src => {
       let inSum = 0, outSum = 0, transIn = 0, transOut = 0;
       data.transactions.forEach(t => {
-        const amt = Number(t.amount);
+        const amt = Number(t.amount) || 0;
         if (t.type === 'income' && t.source === src) inSum += amt;
         if (t.type === 'expense' && t.source === src) outSum += amt;
         if (t.type === 'transfer') {
@@ -570,13 +559,74 @@
       grid.appendChild(card);
     });
 
+    renderPagination('reportPagination', page, Math.ceil(data.sources.length / ITEMS_PER_PAGE), setReportPage);
     document.getElementById('reportDate').textContent = new Date().toLocaleString('id-ID');
+  }
+
+  function setReportPage(page) {
+    if (page < 1 || page > Math.ceil(data.sources.length / ITEMS_PER_PAGE)) return;
+    renderReport(page);
+  }
+
+  function renderPagination(containerId, current, totalPages, setPageFn) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = '';
+
+    if (totalPages <= 1) return;
+
+    const prev = document.createElement('button');
+    prev.textContent = '« Prev';
+    prev.disabled = current === 1;
+    prev.onclick = () => setPageFn(current - 1);
+
+    const next = document.createElement('button');
+    next.textContent = 'Next »';
+    next.disabled = current === totalPages;
+    next.onclick = () => setPageFn(current + 1);
+
+    container.appendChild(prev);
+    container.appendChild(next);
+  }
+
+  function updateTransactions() {
+    renderTransactions(transPage);
+  }
+
+  function updateBalances() {
+    const tbody = document.getElementById('balanceBody');
+    tbody.innerHTML = '';
+
+    const balances = getBalances();
+
+    Object.entries(balances).sort((a,b) => b[1] - a[1]).forEach(([src, bal]) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${src}</td>
+        <td style="text-align:right; color:${bal >= 0 ? 'var(--green)' : 'var(--red)'}">
+          ${bal.toLocaleString('id-ID')}
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function updateTotalBalance() {
+    const balances = getBalances();
+    const total = Object.values(balances).reduce((sum, b) => sum + b, 0);
+    const display = document.getElementById('totalBalanceDisplay');
+    display.textContent = total.toLocaleString('id-ID');
+    display.style.color = total >= 0 ? 'var(--green)' : 'var(--red)';
   }
 
   function toggleReport() {
     const report = document.getElementById('report');
     report.style.display = report.style.display === 'block' ? 'none' : 'block';
-    if (report.style.display === 'block') generateReport();
+    if (report.style.display === 'block') renderReport(1);
+  }
+
+  function toggleTransactions() {
+    const container = document.getElementById('transactionsContainer');
+    container.classList.toggle('show');
   }
 
   function toggleTransferFields() {
@@ -590,16 +640,19 @@
     updateSourceList();
     updateTransactions();
     updateBalances();
+    updateTotalBalance();
     toggleTransferFields();
-    if (document.getElementById('report').style.display === 'block') generateReport();
+    if (document.getElementById('report').style.display === 'block') renderReport(reportPage);
   }
+
+  // Event listeners
   document.getElementById('btnAddSource').addEventListener('click', addSource);
   document.getElementById('btnToggleReport').addEventListener('click', toggleReport);
   document.getElementById('btnSaveTransaction').addEventListener('click', addTransaction);
   document.getElementById('type').addEventListener('change', toggleTransferFields);
+  document.getElementById('btnToggleTransactions').addEventListener('click', toggleTransactions);
 
   toggleTransferFields();
-  // Init date picker
   document.getElementById('date').value = new Date().toISOString().slice(0,10);
 </script>
 
