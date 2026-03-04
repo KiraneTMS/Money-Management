@@ -157,7 +157,7 @@
   <input type="date" id="date" required />
 
   <label>Type</label>
-  <select id="type" onchange="toggleTransferFields()">
+  <select id="type">
     <option value="income">Income (+)</option>
     <option value="expense">Spending (-)</option>
     <option value="transfer">Transfer →</option>
@@ -520,7 +520,7 @@
 
     let totalIncome = 0, totalExpense = 0, totalTransferVol = 0;
     data.transactions.forEach(t => {
-      const amt = Number(t.amount);
+      const amt = Number(t.amount) || 0;
       if (t.type === 'income') totalIncome += amt;
       else if (t.type === 'expense') totalExpense += amt;
       else if (t.type === 'transfer') totalTransferVol += amt;
@@ -596,6 +596,9 @@
   document.getElementById('btnAddSource').addEventListener('click', addSource);
   document.getElementById('btnToggleReport').addEventListener('click', toggleReport);
   document.getElementById('btnSaveTransaction').addEventListener('click', addTransaction);
+  document.getElementById('type').addEventListener('change', toggleTransferFields);
+
+  toggleTransferFields();
   // Init date picker
   document.getElementById('date').value = new Date().toISOString().slice(0,10);
 </script>
